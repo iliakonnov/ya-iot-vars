@@ -201,7 +201,7 @@ def handle_action(event, context):
     changed = {k: v for k, v in current_eval.items() if v != before_eval.get(k)}
     notification = requests.post(
         f'https://dialogs.yandex.net/api/v1/skills/{SKILL_ID}/callback/state',
-        headers={'Authorization': 'OAuth y0_AgAAAAAgzyCWAAT7owAAAAEJqRJkAAAGKr0zmUZDcapD-WzByuc7OAwdBA'},
+        headers={'Authorization': f'OAuth {IAUTH_TOKEN}'},
         json={
             "ts": int(time.time()),
             "payload": {
