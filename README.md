@@ -21,21 +21,25 @@
 
 * Получить список переменных
    ```shell
-   curl https://functions.yandexcloud.net/d4eu1j29elvh2n4o6rkv \
+   curl https://functions.yandexcloud.net/d4eu1j29elvh2n4o6rkv?vars=get \
         -H 'X-Auth-Token: <Token>'
    ```
 * Добавить новую переменную
    ```shell
-   curl https://functions.yandexcloud.net/d4eu1j29elvh2n4o6rkv \
+   curl -X PATCH \
+        https://functions.yandexcloud.net/d4eu1j29elvh2n4o6rkv?vars=set \
         --data-urlencode 'Name=1' \
         -H 'X-Auth-Token: <Token>'
    ```
 * Удалить переменную
    ```shell
-   curl https://functions.yandexcloud.net/d4eu1j29elvh2n4o6rkv \
+   curl -X PATCH
+        https://functions.yandexcloud.net/d4eu1j29elvh2n4o6rkv?vars=set \
         --data-urlencode 'Name=x' \
         -H 'X-Auth-Token: <Token>'
    ```
+
+Также доступен пользовательский интерфейс!
 
 ## Выражения
 
@@ -58,6 +62,7 @@
     CREATE TABLE users(
         uid Int64,
         expressions Yson,
+        PRIMARY KEY (uid)
     );
     ```
 
@@ -78,9 +83,12 @@
 1. Используйте этот репозиторий в качестве исходного кода функции
 2. Укажите переменные окружения в настройках функции:
     - `YDB_DATABASE`: Имя вашей базы данных YDB
-    - `YDB_ENDPOINT`: Адрес для подклюения к БД
+    - `YDB_ENDPOINT`: Адрес для подключения к БД
     - `OAUTH_TOKEN`: Токен в Яндекс.Диалогах (получить [здесь](https://oauth.yandex.ru/authorize?response_type=token&client_id=c473ca268cd749d3a8371351a8f2bcbd))
     - `SKILL_ID`: идентификатор вашего навыка
+    - `CLIENT_ID`: идентификатор вашего приложения
+    - `URL`: URL вашей функции (например, `https://functions.yandexcloud.net/aaaaaaaaaaaaaaaaaaaa`)
 3. Сконфигурируйте сервисный аккаунт для функции и убедитесь, что у него есть права доступа к базе данных.
+    - Опционально, можно настроить API Gateway.
 
 **Используйте навык!** _Возможно придется исправить мелкие баги._

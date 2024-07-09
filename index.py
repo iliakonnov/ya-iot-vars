@@ -11,6 +11,15 @@ import ydb.iam
 
 SKILL_ID = os.getenv('SKILL_ID')
 OAUTH_TOKEN = os.getenv('OAUTH_TOKEN')
+CLIENT_ID = os.getenv('CLIENT_ID')
+HOST = os.getenv('URL')
+SELF_URL = HOST
+
+with open('index.html') as f:
+    INDEX = f.read().replace('{HOST}', HOST).replace('{SELF_URL}', SELF_URL).replace('{CLIENT_ID}', CLIENT_ID)
+
+with open('auth.html') as f:
+    AUTH = f.read().replace('{HOST}', HOST).replace('{SELF_URL}', SELF_URL).replace('{CLIENT_ID}', CLIENT_ID)
 
 driver = ydb.Driver(
     endpoint=os.getenv('YDB_ENDPOINT'),
@@ -29,7 +38,7 @@ class BadRequest(Exception):
 
 
 def evaluate_expressions(expressions: dict[str, str]) -> dict[str, bool]:
-    if len(expressions) > 16:
+    if len(expressions) > 32:
         raise BadRequest('too many expressions')
 
     result: dict[str, bool | None] = {}
@@ -42,6 +51,8 @@ def evaluate_expressions(expressions: dict[str, str]) -> dict[str, bool]:
         result[key] = None
         print(f'evaluating {key!r} = {expressions[key]!r}')
         stack = []
+        if len(expressions[key]) > 100:
+            raise BadRequest(f'too long expression {key!r}')
         expr = expressions[key].split(' ')
         if len(expr) > 10:
             raise BadRequest(f'expression {expr} is too long')
@@ -180,16 +191,31 @@ def handle_action(event, context):
             if key not in expressions:
                 action_result[key] = dict(status='ERROR', error_code='DEVICE_NOT_FOUND')
                 continue
-            expr = expressions[key]
-            if expr != '0' and expr != '1':
-                action_result[key] = dict(status='ERROR', error_code='INVALID_VALUE')
-                continue
-            for cap in dev['capabilities']:
-                if cap['type'] == 'devices.capabilities.on_off':
-                    expressions[key] = str(int(cap['state']['value']))
-                    action_result[key] = dict(status='DONE')
+            set_to = key
+            visited = set()
+            while expressions[set_to] not in ('0', '1'):
+                if set_to in visited:
+                    print(f'loop detected while setting {key}')
+                    action_result[key] = dict(status='ERROR', error_code='INVALID_VALUE')
+                    set_to = None
+                    break
+                visited.add(set_to)
+                expr = expressions[set_to]
+                if len(expr.split(' ')) != 1:
+                    print(f'cant assign to {key}')
+                    action_result[key] = dict(status='ERROR', error_code='INVALID_VALUE')
+                    set_to = None
+                    break
+                set_to = expr
+            if set_to is not None:
+                for cap in dev['capabilities']:
+                    if cap['type'] == 'devices.capabilities.on_off':
+                        expressions[set_to] = str(int(cap['state']['value']))
+                        action_result[key] = dict(status='DONE')
         txn.execute(
-            "update users set expressions=Yson::ParseJson('{}') where uid={};".format(json.dumps(expressions), uid),
+            "upsert into users(uid, expressions)"
+            "VALUES ({}, Yson::ParseJson('{}'));".format(uid,
+                                                                                             json.dumps(expressions)),
             commit_tx=True,
         )
         return before, expressions, action_result
@@ -201,7 +227,7 @@ def handle_action(event, context):
     changed = {k: v for k, v in current_eval.items() if v != before_eval.get(k)}
     notification = requests.post(
         f'https://dialogs.yandex.net/api/v1/skills/{SKILL_ID}/callback/state',
-        headers={'Authorization': f'OAuth {IAUTH_TOKEN}'},
+        headers={'Authorization': f'OAuth {OAUTH_TOKEN}'},
         json={
             "ts": int(time.time()),
             "payload": {
@@ -251,7 +277,7 @@ def render_state(expressions, evaluated, changed):
     ]
 
 
-def handle_set_var(event, context):
+def handle_set_var(event, context, patch):
     if event['headers'].get('Content-Type') != 'application/x-www-form-urlencoded':
         raise BadRequest('application/x-www-form-urlencoded expected')
 
@@ -260,13 +286,16 @@ def handle_set_var(event, context):
 
     def process(session):
         txn = session.transaction(ydb.SerializableReadWrite())
-        rows = txn.execute(
-            'select Yson::SerializeJson(expressions) as expressions from users where uid = {};'.format(uid),
-        )[0].rows
-        if not rows or not rows[0].expressions:
+        if not patch:
             expressions = {}
         else:
-            expressions = json.loads(rows[0].expressions)
+            rows = txn.execute(
+                'select Yson::SerializeJson(expressions) as expressions from users where uid = {};'.format(uid),
+            )[0].rows
+            if not rows or not rows[0].expressions:
+                expressions = {}
+            else:
+                expressions = json.loads(rows[0].expressions)
 
         for key, vals in data.items():
             if not vals or not vals[0] or vals[0] == 'x':
@@ -281,7 +310,8 @@ def handle_set_var(event, context):
             return str(e), expressions
 
         txn.execute(
-            "update users set expressions=Yson::ParseJson('{}') where uid={};".format(json.dumps(expressions), uid),
+            "upsert into users(uid, expressions)"
+            "values ({}, Yson::ParseJson('{}'));".format(uid, json.dumps(expressions)),
             commit_tx=True,
         )
         return None, expressions
@@ -350,10 +380,29 @@ def handler(event, context):
             event['body'] = base64.b64decode(event['body']).decode('utf-8')
         print('data', event.get('body'))
         try:
-            if event['httpMethod'] == 'POST':
-                return handle_set_var(event, context)
-            elif event['httpMethod'] == 'GET':
-                return handle_get_vars(event, context)
+            if event['queryStringParameters'].get('vars'):
+                if event['httpMethod'] == 'PATCH':
+                    return handle_set_var(event, context, patch=True)
+                elif event['httpMethod'] == 'POST':
+                    return handle_set_var(event, context, patch=False)
+                elif event['httpMethod'] == 'GET':
+                    return handle_get_vars(event, context)
+            elif event['queryStringParameters'].get('auth'):
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'text/html',
+                    },
+                    'body': AUTH,
+                }
+            else:
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'text/html',
+                    },
+                    'body': INDEX,
+                }
             raise BadRequest('not found', 404)
         except BadRequest as e:
             return {

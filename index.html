@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Переменные умного дома</title>
+
+    <script src="https://yastatic.net/s3/passport-sdk/autofill/v1/sdk-suggest-with-polyfills-latest.js"></script>
+    <script src="https://unpkg.com/blockly/blockly_compressed.js"></script>
+    <script src="https://unpkg.com/blockly/msg/ru.js"></script>
+</head>
+<body>
+<div id="blocklyDiv" style="position: absolute; top: 0; bottom: 0; left: 0; right: 0;"></div>
+<button id="saveButton" style="position: absolute; right: 0; top: 0; background-color: #28aa04; color: white; padding: 15px 32px; text-align: center; text-decoration: none; display: inline-block; font-size: 16px;">Сохранить</button>
+<script>
+    Blockly.setLocale('ru')
+    Blockly.defineBlocks = Blockly.common.defineBlocks
+
+    const toolbox = {
+        kind: 'categoryToolbox',
+        contents: [
+            {
+                kind: 'category',
+                name: 'Блоки',
+                expanded: true,
+                contents: [
+                    {kind: 'block', type: 'logic_boolean'},
+                    {kind: 'block', type: 'logic_operation'},
+                    {kind: 'block', type: 'logic_negate'},
+                ]
+            },
+            {
+                kind: "category",
+                name: "Переменные",
+                custom: "VARIABLE",
+                expanded: true,
+            },
+        ]
+    };
+
+    const definitions = Blockly.common.createBlockDefinitionsFromJsonArray([
+        {
+            type: 'vars',
+            message0: 'Переменные%1',
+            args0: [
+                {
+                    type: 'input_statement',
+                    name: 'VARS',
+                },
+            ],
+            style: {
+                hat: 'cap',
+            },
+        },
+        {
+            type: 'variables_get',
+            message0: '%1',
+            args0: [
+                {
+                    type: 'field_variable',
+                    name: 'VAR',
+                    variable: 'item',
+                    variableTypes: [''],
+                },
+            ],
+            output: null,
+            style: 'variable_blocks',
+        },
+        {
+            type: 'logic_boolean',
+            message0: '%1',
+            args0: [
+                {
+                    type: 'field_dropdown',
+                    name: 'VAL',
+                    options: [
+                        ["истина", "TRUE"],
+                        ["ложь", "FALSE"],
+                    ]
+                },
+            ],
+            style: 'logic_blocks',
+            output: null,
+        },
+        {
+            type: 'logic_negate',
+            message0: 'не %1',
+            args0: [
+                {
+                    type: 'input_value',
+                    name: 'ARG',
+                },
+            ],
+            style: 'logic_blocks',
+            output: null,
+        },
+        {
+            type: 'variables_set',
+            message0: '%1 := %2',
+            args0: [
+                {
+                    type: 'field_variable',
+                    name: 'VAR',
+                    variable: 'item',
+                    variableTypes: [''],
+                },
+                {
+                    type: 'input_value',
+                    name: 'VAL',
+                },
+            ],
+            previousStatement: null,
+            nextStatement: null,
+            style: 'variable_blocks',
+        },
+        {
+            type: 'logic_operation',
+            message0: '%1',
+            args0: [
+                {
+                    type: 'input_value',
+                    name: 'ARG_1',
+                },
+            ],
+            message1: '%1',
+            args1: [
+                {
+                    type: 'field_dropdown',
+                    name: 'OP',
+                    options: [
+                        ["или", "OR"],
+                        ["и", "AND"],
+                        ["xor", "XOR"],
+                    ]
+                },
+            ],
+            message2: '%1',
+            args2: [
+                {
+                    type: 'input_value',
+                    name: 'ARG_2',
+                },
+            ],
+            style: 'logic_blocks',
+            output: null,
+        }
+    ]);
+    Blockly.defineBlocks(definitions);
+
+    const workspace = Blockly.inject('blocklyDiv', {
+        toolbox,
+        comments: true,
+        trashcan: true,
+        sounds: false,
+    });
+
+    const generator = new Blockly.Generator('iot');
+    generator.forBlock['vars'] = function (block, generator) {
+        const inner = generator.statementToCode(block, 'VARS');
+        return `{${inner}}`
+    }
+    generator.forBlock['variables_get'] = function (block, generator) {
+        return [block.getField('VAR').variable.name, 0]
+    }
+    generator.forBlock['logic_boolean'] = function (block, generator) {
+        return [block.getFieldValue('VAL') === 'TRUE' ? '1' : '0', 0]
+    }
+    generator.forBlock['variables_set'] = function (block, generator) {
+        const key = block.getField('VAR').variable.name;
+        const val = generator.valueToCode(block, 'VAL', 0);
+        return `"${key}": "${val}"`
+    }
+    generator.forBlock['logic_operation'] = function (block, generator) {
+        const left = generator.valueToCode(block, 'ARG_1', 0);
+        const right = generator.valueToCode(block, 'ARG_2', 0);
+        const op = {
+            'OR': '|',
+            'AND': '&',
+            'XOR': '^',
+        }[block.getFieldValue('OP')]
+        return [`${left} ${right} ${op}`, 0]
+    }
+    generator.scrub_ = function (block, code, thisOnly) {
+        const nextBlock =
+            block.nextConnection && block.nextConnection.targetBlock();
+        if (nextBlock && !thisOnly) {
+            return code + ',\n' + generator.blockToCode(nextBlock);
+        }
+        return code;
+    };
+    window.parseCode = (data) => {
+        function expressionToBlock(expr) {
+            let stack = []
+            for (let token of expr.split(' ')) {
+                if (token === '0' || token === '1') {
+                    stack.push({
+                        block: {
+                            type: 'logic_boolean',
+                            id: Blockly.utils.idGenerator.getNextUniqueId(),
+                            fields: {
+                                VAL: token === '0' ? 'FALSE' : 'TRUE'
+                            }
+                        },
+                    })
+                } else if (token === '!') {
+                    const prev = stack.pop()
+                    stack.push({
+                        block: {
+                            type: 'logic_negate',
+                            id: Blockly.utils.idGenerator.getNextUniqueId(),
+                            inputs: {
+                                ARG: prev,
+                            },
+                        }
+                    })
+                } else if (token === '|' || token === '&' || token === '^') {
+                    const right = stack.pop()
+                    const left = stack.pop()
+                    stack.push({
+                        block: {
+                            type: 'logic_operation',
+                            id: Blockly.utils.idGenerator.getNextUniqueId(),
+                            inputs: {
+                                ARG_1: left,
+                                ARG_2: right,
+                            },
+                            fields: {
+                                OP: {
+                                    '|': 'OR',
+                                    '&': 'AND',
+                                    '^': 'XOR',
+                                }[token]
+                            }
+                        }
+                    })
+                } else {
+                    stack.push({
+                        block: {
+                            type: 'variables_get',
+                            id: Blockly.utils.idGenerator.getNextUniqueId(),
+                            fields: {
+                                VAR: {id: variables_map[token]}
+                            },
+                        }
+                    })
+                }
+            }
+            return stack.pop()
+        }
+
+        const variables_map = {};
+        for (let [key, val] of Object.entries(data)) {
+            variables_map[key] = Blockly.utils.idGenerator.getNextUniqueId();
+        }
+        const variables = [];
+        const blocks = []
+        for (let [key, expr] of Object.entries(data)) {
+            variables.push({
+                id: variables_map[key],
+                name: key,
+            })
+            blocks.push({
+                id: Blockly.utils.idGenerator.getNextUniqueId(),
+                type: "variables_set",
+                fields: {
+                    VAR: {
+                        id: variables_map[key],
+                    }
+                },
+                inputs: {
+                    VAL: expressionToBlock(expr),
+                }
+            })
+        }
+        let block = undefined;
+        for (let b of blocks.reverse()) {
+            block = {
+                block: {
+                    ...b,
+                    next: block
+                }
+            }
+        }
+        return JSON.parse(JSON.stringify({
+            blocks: {
+                languageVersion: 0,
+                blocks: [{
+                    id: Blockly.utils.idGenerator.getNextUniqueId(),
+                    type: "vars",
+                    inputs: {
+                        VARS: block
+                    }
+                }]
+            },
+            variables
+        }));
+    }
+    (async function () {
+        let token = null;
+        try {
+            const resp = await YaAuthSuggest.init(
+                {
+                    client_id: '{CLIENT_ID}',
+                    response_type: 'token',
+                    redirect_uri: '{SELF_URL}?auth=true'
+                },
+                '{HOST}'
+            ).then(({handler}) => handler());
+            token = resp.access_token
+        } catch (e) {
+            alert(`Не удалось авторизоваться: ${e}`)
+            return
+        }
+        const vars = await fetch('?vars=get', {
+            headers: {
+                'X-Auth-Token': token,
+            }
+        }).then(resp => resp.json());
+        Blockly.serialization.workspaces.load(parseCode(vars.expressions), workspace);
+
+        document.getElementById("saveButton").onclick = async function () {
+            try {
+                const code = generator.workspaceToCode(workspace);
+                const parsed = JSON.parse(code);
+                const formBody = Object.keys(parsed).map(key => encodeURIComponent(key) + '=' + encodeURIComponent(parsed[key])).join('&');
+                const res = await fetch('?vars=write', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'X-Auth-Token': token,
+                    },
+                    body: formBody
+                }).then(x => x.json())
+                if (res.error) {
+                    throw res.error
+                }
+                Blockly.serialization.workspaces.load(parseCode(parsed), workspace)
+            } catch (e) {
+                alert(`Не удалось сохранить: ${e}`)
+            }
+        }
+    })()
+</script>
+</body>
+</html>
