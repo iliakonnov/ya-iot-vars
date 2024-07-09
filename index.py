@@ -90,7 +90,7 @@ def check_auth(event, context) -> int:
     })
     if jwt.status_code != 200:
         raise BadRequest('unauthorized', 403)
-    info = json.loads(base64.b64decode(jwt.text.split('.')[1]).decode('utf-8'))
+    info = json.loads(base64.urlsafe_b64decode(jwt.text.split('.')[1] + '==').decode('utf-8'))
     uid = info['uid']
     print(f'authorized as {uid}')
     return uid
